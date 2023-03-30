@@ -1,0 +1,116 @@
+---
+title: "Practical Machine Learning Project"
+author: "Rodrigo Falcão"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+## Loading Packages and Spliting Data
+```{r}
+library(caret)
+library(rattle)
+
+set.seed(666)
+training_all <- read.csv("./data/pml-training.csv")
+testing <- read.csv("./data/pml-testing.csv")
+
+#Splitting Training Data in two parts: validation and training data sets
+in_train <- createDataPartition(y=training_all$classe, p=0.7, list=F)
+training <- training_all[in_train,]
+validation <- training_all[-in_train,]
+
+training <- training[, -c(1:7)]
+validation <- validation[, -c(1:7)]
+```
+
+## Cleaning and Subseting Training Data
+First it necessary to clear the that, to do this the approach was first dropping columns with more than 45% missing values, then removing near zero variance features and finally removing high correlated features with more than 80% correlation. Doing that, the final set of columns has 40 variables.
+```{r}
+#Removing Columns with more than 45% NA values
+na_remover <- function(df){
+  cols <- names(df)
+  remove_cols <- c()
+  for (col in cols) {
+    if (sum(is.na(df[col]))/length(df[col]) > 0.45) {
+      remove_cols <- c(remove_cols, col)
+    }
+  }
+  return(remove_cols)
+}
+
+na_cols <- na_remover(training)
+training <- training[!(names(training) %in% na_cols)]
+
+#Removing Near Zero Variance
+
+nvz_cols <- nearZeroVar(training)
+training <- training[,-nvz_cols]
+
+#Removing Correlated Featues
+cor_data <- as.data.frame(abs(cor(training[, names(training) != "classe"])))
+
+cor_cols <- c()
+for (i in 2:ncol(cor_data)) {
+  for (j in 1:(i - 1)) {
+    if (cor_data[i, j] > 0.8) {
+      cor_cols <- c(cor_cols, names(cor_data[i]))
+    }
+  }
+}
+
+training <- training[,!(names(training) %in% cor_cols)]
+validation <- validation[, names(validation) %in% names(training)]
+```
+
+## ML Models
+
+Since the goal is to predict categorical data (Classification) three tree models were choose, which are: Decision Tree, Random Forest and Gradient Boosted Tree
+## Decision Tree Model
+
+```{r}
+control <- trainControl(method="cv", number=5, verboseIter=F)
+
+trees_model <- train(classe ~ ., data=training, method="rpart", trControl = control, tuneLength = 5)
+fancyRpartPlot(trees_model$finalModel)
+
+trees_pred <- predict(trees_model, validation)
+trees_cm <- confusionMatrix(trees_pred, factor(validation$classe))
+trees_cm
+```
+
+## Random Forest Model
+
+```{r}
+rf_model <- train(classe ~ ., data=training, method="rf", trControl = control, tuneLength = 5)
+
+rf_pred <- predict(rf_model, validation)
+rf_cm <- confusionMatrix(rf_pred, factor(validation$classe))
+rf_cm
+```
+
+## Gradient Boosted Trees Model
+
+```{r}
+gbm_model <- train(classe~., data=training, method="gbm", trControl = control, tuneLength = 5, verbose = F)
+
+pred_gbm <- predict(gbm_model, validation)
+gbm_cm <- confusionMatrix(pred_gbm, factor(validation$classe))
+gbm_cm
+```
+## Predict on test set
+
+From the results above it is possible to conclude that the Random Forest Approach was the best when it comes to accuracy. The Prediction of testing set cases is shown below
+
+```{r}
+testing <- testing[names(testing) %in% names(training)]
+pred <- predict(rf_model, testing)
+print(pred)
+```
